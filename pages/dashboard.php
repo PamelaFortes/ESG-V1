@@ -78,13 +78,13 @@ if ($page === 'dashboard'):
     </div>
     <div class="kpi-card">
       <div class="kpi-icon amber"><?= ico('clock', 15) ?></div>
-      <div class="kpi-val"><?= count($expiring) ?></div>
+      <div class="kpi-val"><?= $treinamentosPendentes ?></div>
       <div class="kpi-lbl">Próximos do vencimento</div>
       <div class="kpi-sub"><?= count($in7) ?> vencem em até 7 dias</div>
     </div>
     <div class="kpi-card">
       <div class="kpi-icon red"><?= ico('alert', 15) ?></div>
-      <div class="kpi-val"><?= count($expired) ?></div>
+      <div class="kpi-val"><?= $treinamentosVencidos ?></div>
       <div class="kpi-lbl">Treinamentos vencidos</div>
       <div class="kpi-sub">requerem renovação imediata</div>
     </div>
