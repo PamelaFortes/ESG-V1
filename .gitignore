@@ -2,6 +2,8 @@ node_modules/
 dist/
 build/
 .cache/
+.env
+!.env.example
 .env*
 .vite/
 vite.config.*.timestamp-*
@@ -18,3 +20,4 @@ logs/
 # beside it.
 /.plugins/
 /.opencode-skills/
+.informativo.md
