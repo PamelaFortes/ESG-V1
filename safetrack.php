@@ -10,29 +10,30 @@ require_once __DIR__ . '/config/mock_data.php';
 require_once __DIR__ . '/includes/functions.php';
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'login') {
-    $email = trim($_POST['email'] ?? '');
-    $pass  = $_POST['password'] ?? '';
-    $found = null;
-    foreach ($users as $u) {
-        if ($u['email'] === $email && $u['password'] === $pass) { $found = $u; break; }
-    }
-    if ($found) {
+
+    require_once __DIR__ . '/config/usuarios.php';
+
+    $pass = $_POST['password'] ?? '';
+
+    if ($user && password_verify($pass, $user['senha'])) {
+
         $_SESSION['logged_in'] = true;
-        $_SESSION['role']      = $found['role'];
-        $_SESSION['user_name'] = $found['name'];
-        $_SESSION['emp_id']    = $found['emp_id'];
-        $dest = $found['role'] === 'gestor' ? '?page=dashboard' : '?page=meu-perfil';
+        $_SESSION['role']      = $user['tipo'];
+        $_SESSION['user_name'] = $user['nome'];
+        $_SESSION['emp_id']    = $user['funcionario_id'];
+
+        $dest = $user['tipo'] === 'gestor'
+            ? '?page=dashboard'
+            : '?page=meu-perfil';
+
         header('Location: ' . $dest);
         exit;
+
     } else {
+
         header('Location: ?page=login&error=1');
         exit;
     }
-}
-if (isset($_GET['logout'])) {
-    session_destroy();
-    header('Location: ?page=login');
-    exit;
 }
 
 $page        = $_GET['page'] ?? 'login';
@@ -474,13 +475,20 @@ $my_expiring = array_filter($emp_records, fn($r) => $r['status'] === 'expiring')
 
     <!-- Page Content -->
     <main class="app-content">
-?>
+
 <?php
+
+
+//DASHBOARD 
+
+if ($page === 'dashboard'):
+
+    require_once __DIR__ . '/pages/dashboard.php';
 
 // ====================================================================
 // EMPLOYEES LIST
 // ====================================================================
-if ($page === 'employees'):
+elseif ($page === 'employees'):
     $roles = array_unique(array_column($employees, 'role'));
     sort($roles);
     $filtered = $employees;
