@@ -2,6 +2,7 @@
 
 require_once __DIR__ . '/../config/funcionarios.php';
 require_once __DIR__ . '/../config/treinamentos.php';
+require_once __DIR__ . '/../config/registro_treinamento.php';
 
 // ============================================================
 // CÁLCULOS DO DASHBOARD
@@ -17,7 +18,7 @@ function calcularFuncionariosAtivos($employees)
     $total = 0;
 
     foreach ($employees as $employee) {
-        if ($employee['status'] === 'ativo') {
+        if ($employee['status'] === 'active') {
             $total++;
         }
     }
@@ -33,10 +34,6 @@ $totalTreinamentos = count($trainings);
 // ============================================================
 // DADOS TEMPORÁRIOS DE TREINAMENTOS
 // ============================================================
-
-// Por enquanto, os treinamentos continuam vindo do mock_data.php.
-// Depois vamos substituir pelo Supabase.
-
 $expired = array_filter(
     $records,
     fn($r) => $r['status'] === 'expired'

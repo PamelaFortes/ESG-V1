@@ -1,43 +1,152 @@
 <?php
-session_start();
-
-// ── Contas de usuário ─────────────────────────────────────────────────────
-// role: 'gestor' = acesso total | 'funcionario' = acesso ao próprio perfil
 
 
-// ── Login / Logout ────────────────────────────────────────────────────────
-require_once __DIR__ . '/config/mock_data.php';
+require_once __DIR__ . '/config/funcionarios.php';
+require_once __DIR__ . '/config/treinamentos.php';
+require_once __DIR__ . '/config/registro_treinamento.php';
 require_once __DIR__ . '/includes/functions.php';
+require_once __DIR__ . '/includes/auth.php';
 
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && ($_POST['action'] ?? '') === 'login') {
 
-    require_once __DIR__ . '/config/usuarios.php';
+if (
+    $_SERVER['REQUEST_METHOD'] === 'POST'
+    && ($_POST['action'] ?? '') === 'register_training'
+) {
 
-    $pass = $_POST['password'] ?? '';
+    require_once __DIR__ . '/config/database.php';
 
-    if ($user && password_verify($pass, $user['senha'])) {
+    $funcionario_id = (int)($_POST['funcionario_id'] ?? 0);
+    $treinamento_id = (int)($_POST['treinamento_id'] ?? 0);
+    $data_realizacao = $_POST['data_realizacao'] ?? '';
+    $data_validade = $_POST['data_validade'] ?? '';
+    $observacoes = trim($_POST['observacoes'] ?? '');
 
-        $_SESSION['logged_in'] = true;
-        $_SESSION['role']      = $user['tipo'];
-        $_SESSION['user_name'] = $user['nome'];
-        $_SESSION['emp_id']    = $user['funcionario_id'];
+    if (
+        $funcionario_id > 0 &&
+        $treinamento_id > 0 &&
+        $data_realizacao !== '' &&
+        $data_validade !== ''
+    ) {
 
-        $dest = $user['tipo'] === 'gestor'
-            ? '?page=dashboard'
-            : '?page=meu-perfil';
+        $sql = "
+            INSERT INTO registros_treinamento
+            (
+                funcionario_id,
+                treinamento_id,
+                data_realizacao,
+                data_validade,
+                observacoes
+            )
+            VALUES
+            (
+                :funcionario_id,
+                :treinamento_id,
+                :data_realizacao,
+                :data_validade,
+                :observacoes
+            )
+        ";
 
-        header('Location: ' . $dest);
-        exit;
+        $stmt = $pdo->prepare($sql);
 
-    } else {
+        $stmt->execute([
+            'funcionario_id' => $funcionario_id,
+            'treinamento_id' => $treinamento_id,
+            'data_realizacao' => $data_realizacao,
+            'data_validade' => $data_validade,
+            'observacoes' => $observacoes
+        ]);
 
-        header('Location: ?page=login&error=1');
+        header(
+            'Location: ?page=employee-profile&id=' . $funcionario_id
+        );
         exit;
     }
 }
-
-$page        = $_GET['page'] ?? 'login';
 $emp_id      = (int)($_GET['id'] ?? 1);
+if (
+    $_SERVER['REQUEST_METHOD'] === 'POST'
+    && ($_POST['action'] ?? '') === 'save_employee'
+) {
+
+    require_once __DIR__ . '/config/database.php';
+
+    $nome = trim($_POST['nome'] ?? '');
+    $cpf = trim($_POST['cpf'] ?? '');
+    $email = trim($_POST['email'] ?? '');
+    $telefone = trim($_POST['telefone'] ?? '');
+    $cargo = trim($_POST['cargo'] ?? '');
+    $setor = trim($_POST['setor'] ?? '');
+    $data_admissao = $_POST['data_admissao'] ?? '';
+    $status = $_POST['status'] ?? 'active';
+
+    if (
+        $nome !== '' &&
+        $cpf !== '' &&
+        $cargo !== '' &&
+        $setor !== '' &&
+        $data_admissao !== ''
+    ) {
+
+        // O sistema usa active/inactive,
+        // mas o banco usa ativo/inativo.
+        $statusBanco = $status === 'active'
+            ? 'ativo'
+            : 'inativo';
+
+        $sql = "
+            INSERT INTO funcionarios
+            (
+                nome,
+                cpf,
+                email,
+                telefone,
+                cargo,
+                setor,
+                data_admissao,
+                status
+            )
+            VALUES
+            (
+                :nome,
+                :cpf,
+                :email,
+                :telefone,
+                :cargo,
+                :setor,
+                :data_admissao,
+                :status
+            )
+        ";
+
+        $stmt = $pdo->prepare($sql);
+
+        try {
+
+          $stmt->execute([
+              'nome' => $nome,
+              'cpf' => $cpf,
+              'email' => $email !== '' ? $email : null,
+              'telefone' => $telefone !== '' ? $telefone : null,
+              'cargo' => $cargo,
+              'setor' => $setor,
+              'data_admissao' => $data_admissao,
+              'status' => $statusBanco
+          ]);
+
+          header('Location: ?page=employee-form&saved=1');
+          exit;
+
+      } catch (PDOException $e) {
+
+          if ($e->getCode() === '23505') {
+              $error = 'CPF já cadastrado. Verifique os dados e tente novamente.';
+          } else {
+              $error = 'Erro ao cadastrar funcionário.';
+          }
+      }
+    }
+}
 $tab         = $_GET['tab'] ?? 'all';
 $s_sect      = $_GET['sector'] ?? '';
 $s_train     = $_GET['training'] ?? '';
@@ -66,69 +175,6 @@ if ($sess_role === 'gestor' && in_array($page, $employee_pages)) {
 }
 
 
-// ── Helpers ───────────────────────────────────────────────────────────────
-
-function initials($name) {
-    $parts = array_filter(explode(' ', $name));
-    $out = '';
-    foreach ($parts as $p) { if (strlen($out) < 2) $out .= strtoupper($p[0]); }
-    return $out;
-}
-
-function h($s) { return htmlspecialchars((string)$s, ENT_QUOTES, 'UTF-8'); }
-
-function url($params) { return '?' . http_build_query($params); }
-
-function status_badge($status) {
-    $map = ['valid'=>['Válido','bdg-valid'],'expiring'=>['Próximo do vencimento','bdg-expiring'],'expired'=>['Vencido','bdg-expired']];
-    [$lbl,$cls] = $map[$status] ?? ['—',''];
-    return "<span class=\"bdg $cls\">$lbl</span>";
-}
-
-function emp_badge($status) {
-    return $status === 'active'
-        ? '<span class="bdg bdg-active">Ativo</span>'
-        : '<span class="bdg bdg-inactive">Inativo</span>';
-}
-
-function ico($name, $size = 16, $cls = '') {
-    $icons = [
-        'dashboard' => 'M3 9l9-7 9 7v11a2 2 0 01-2 2H5a2 2 0 01-2-2z|M9 22V12h6v10',
-        'users'     => 'M17 21v-2a4 4 0 00-4-4H5a4 4 0 00-4 4v2|M9 7a4 4 0 100 8 4 4 0 000-8z',
-        'book'      => 'M2 3h6a4 4 0 014 4v14a3 3 0 00-3-3H2z|M22 3h-6a4 4 0 00-4 4v14a3 3 0 013-3h7z',
-        'alert'     => 'M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z|M12 9v4|M12 17h.01',
-        'chart'     => 'M18 20V10|M12 20V4|M6 20v-6',
-        'search'    => 'M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0',
-        'bell'      => 'M18 8A6 6 0 006 8c0 7-3 9-3 9h18s-3-2-3-9|M13.73 21a2 2 0 01-3.46 0',
-        'plus'      => 'M12 5v14|M5 12h14',
-        'eye'       => 'M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z|M12 9a3 3 0 100 6 3 3 0 000-6z',
-        'edit'      => 'M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7|M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z',
-        'trash'     => 'M3 6h18|M8 6V4h8v2|M19 6l-1 14H6L5 6',
-        'shield'    => 'M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z',
-        'logout'    => 'M9 21H5a2 2 0 01-2-2V5a2 2 0 012-2h4|M16 17l5-5-5-5|M21 12H9',
-        'x'         => 'M18 6L6 18|M6 6l12 12',
-        'check'     => 'M20 6L9 17l-5-5',
-        'chevron'   => 'M9 18l6-6-6-6',
-        'upload'    => 'M21 15v4a2 2 0 01-2 2H5a2 2 0 01-2-2v-4|M17 8l-5-5-5 5|M12 3v12',
-        'clock'     => 'M12 22a10 10 0 100-20 10 10 0 000 20z|M12 6v6l4 2',
-    ];
-    $d = $icons[$name] ?? '';
-    $paths = '';
-    foreach (explode('|', $d) as $p) $paths .= "<path d=\"$p\"/>";
-    $ca = $cls ? " class=\"$cls\"" : '';
-    return "<svg width=\"$size\" height=\"$size\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" stroke-linejoin=\"round\"$ca aria-hidden=\"true\">$paths</svg>";
-}
-
-function find_emp($employees, $id) {
-    foreach ($employees as $e) { if ($e['id'] === $id) return $e; }
-    return $employees[0];
-}
-
-function active_nav($page) {
-    if (in_array($page, ['employees','employee-form','employee-profile'])) return 'employees';
-    if (in_array($page, ['trainings','training-form','register-training'])) return 'trainings';
-    return $page;
-}
 
 $active_nav = active_nav($page);
 
@@ -207,31 +253,6 @@ $breadcrumbs = [
         </button>
       </form>
 
-      <!-- Acessos de demonstração -->
-      <div class="demo-box" style="margin-top:24px">
-        <div class="demo-box-hdr">Acessos de demonstração — clique para preencher</div>
-
-        <div style="padding:8px 14px 4px;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#94a3b8">Gestores</div>
-        <?php foreach ($users as $u): if ($u['role'] !== 'gestor') continue; ?>
-        <div class="demo-account" onclick="fillLogin('<?= h($u['email']) ?>','<?= h($u['password']) ?>')">
-          <span class="demo-role-pill gestor">Gestor</span>
-          <span class="demo-email"><?= h($u['email']) ?></span>
-          <span class="demo-pass"><?= h($u['password']) ?></span>
-        </div>
-        <?php endforeach; ?>
-
-        <div style="padding:8px 14px 4px;border-top:1px solid #f1f5f9;font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:#94a3b8">Funcionários</div>
-        <?php foreach ($users as $u): if ($u['role'] !== 'funcionario') continue; ?>
-        <div class="demo-account" onclick="fillLogin('<?= h($u['email']) ?>','<?= h($u['password']) ?>')">
-          <span class="demo-role-pill func">Funcionário</span>
-          <span class="demo-email"><?= h($u['email']) ?></span>
-          <span class="demo-pass"><?= h($u['password']) ?></span>
-        </div>
-        <?php endforeach; ?>
-      </div>
-    </div>
-  </div>
-</div>
 <script>
 function fillLogin(email, pass) {
   document.getElementById('login-email').value = email;
@@ -478,657 +499,62 @@ $my_expiring = array_filter($emp_records, fn($r) => $r['status'] === 'expiring')
 
 <?php
 
-
-//DASHBOARD 
-
+// DASHBOARD
 if ($page === 'dashboard'):
 
     require_once __DIR__ . '/pages/dashboard.php';
 
-// ====================================================================
+
 // EMPLOYEES LIST
-// ====================================================================
 elseif ($page === 'employees'):
-    $roles = array_unique(array_column($employees, 'role'));
-    sort($roles);
-    $filtered = $employees;
 
-    if ($s_q) {
-        $filtered = array_filter(
-            $filtered,
-            fn($e) =>
-                stripos($e['name'], $s_q) !== false ||
-                strpos($e['cpf'], $s_q) !== false ||
-                stripos($e['sector'], $s_q) !== false
-        );
-    }
+    require_once __DIR__ . '/pages/funcionarios/index.php';
 
-    if ($s_role) {
-        $filtered = array_filter($filtered, fn($e) => $e['role'] === $s_role);
-    }
 
-    if ($s_stat) {
-        $filtered = array_filter($filtered, fn($e) => $e['status'] === $s_stat);
-    }
-
-    $filtered = array_values($filtered);
-?>
-
-<div class="pg">
-  <div class="pg-hdr">
-    <div>
-      <div class="pg-title">Funcionários</div>
-      <div class="pg-sub"><?= count($employees) ?> colaboradores cadastrados</div>
-    </div>
-    <a href="<?= url(['page'=>'employee-form']) ?>" class="btn btn-primary">
-      <?= ico('plus', 13) ?> Novo funcionário
-    </a>
-  </div>
-
-  <form method="GET" action="" class="filter-bar">
-    <input type="hidden" name="page" value="employees">
-    <div class="filter-input">
-      <span class="filter-ico"><?= ico('search', 13) ?></span>
-      <input type="text" name="q" placeholder="Buscar por nome, CPF ou setor..." value="<?= h($s_q) ?>">
-    </div>
-    <select name="role" class="filter-sel" onchange="this.form.submit()">
-      <option value="">Todos os cargos</option>
-      <?php foreach ($roles as $r): ?>
-      <option value="<?= h($r) ?>" <?= $s_role===$r ? 'selected' : '' ?>><?= h($r) ?></option>
-      <?php endforeach; ?>
-    </select>
-    <select name="stat" class="filter-sel" onchange="this.form.submit()">
-      <option value="">Todas as situações</option>
-      <option value="active" <?= $s_stat==='active' ? 'selected' : '' ?>>Ativo</option>
-      <option value="inactive" <?= $s_stat==='inactive' ? 'selected' : '' ?>>Inativo</option>
-    </select>
-    <button type="submit" class="btn btn-secondary btn-sm">Filtrar</button>
-  </form>
-
-  <div class="tbl-wrap">
-    <table class="data-tbl">
-      <thead>
-        <tr>
-          <th>Funcionário</th>
-          <th>CPF</th>
-          <th>Cargo / Setor</th>
-          <th>Treinamentos</th>
-          <th>Situação</th>
-          <th>Ações</th>
-        </tr>
-      </thead>
-      <tbody>
-        <?php if (empty($filtered)): ?>
-        <tr><td colspan="6" class="tbl-empty">Nenhum funcionário encontrado. Tente ajustar os filtros.</td></tr>
-        <?php else: ?>
-        <?php foreach ($filtered as $e): ?>
-        <tr>
-          <td>
-            <div style="display:flex;align-items:center;gap:10px">
-              <span class="avatar av-md"><?= initials($e['name']) ?></span>
-              <div>
-                <div class="cell-primary"><?= h($e['name']) ?></div>
-                <div class="cell-secondary"><?= h($e['email']) ?></div>
-              </div>
-            </div>
-          </td>
-          <td class="cell-mono"><?= h($e['cpf']) ?></td>
-          <td>
-            <div style="font-size:12px;font-weight:500;color:#1e293b"><?= h($e['role']) ?></div>
-            <div class="cell-secondary"><?= h($e['sector']) ?></div>
-          </td>
-          <td>
-            <div class="t-stats">
-              <span class="t-dot t-green"><?= $e['t_valid'] ?></span>
-              <?php if ($e['t_expiring'] > 0): ?><span class="t-dot t-amber"><?= $e['t_expiring'] ?></span><?php endif; ?>
-              <?php if ($e['t_expired'] > 0): ?><span class="t-dot t-red"><?= $e['t_expired'] ?></span><?php endif; ?>
-            </div>
-          </td>
-          <td><?= emp_badge($e['status']) ?></td>
-          <td>
-            <div style="display:flex;gap:4px">
-              <a href="<?= url(['page'=>'employee-profile','id'=>$e['id']]) ?>" class="btn-icon blue" title="Ver perfil"><?= ico('eye', 14) ?></a>
-              <a href="<?= url(['page'=>'employee-form','id'=>$e['id']]) ?>" class="btn-icon" title="Editar"><?= ico('edit', 14) ?></a>
-            </div>
-          </td>
-        </tr>
-        <?php endforeach; ?>
-        <?php endif; ?>
-      </tbody>
-    </table>
-    <?php if (!empty($filtered)): ?>
-    <div class="tbl-footer">Mostrando <?= count($filtered) ?> de <?= count($employees) ?> funcionários</div>
-    <?php endif; ?>
-  </div>
-</div>
-
-<?php
-// ====================================================================
 // EMPLOYEE FORM
-// ====================================================================
 elseif ($page === 'employee-form'):
-  $saved = isset($_GET['saved']);
-?>
-<div class="pg max-w-3xl">
-  <div class="pg-hdr">
-    <div>
-      <div class="pg-title">Novo funcionário</div>
-      <div class="pg-sub">Preencha os dados para cadastrar um novo colaborador</div>
-    </div>
-  </div>
-  <?php if ($saved): ?>
-  <div class="alert alert-success"><?= ico('check', 14) ?> Funcionário salvo com sucesso!</div>
-  <?php endif; ?>
-  <form method="POST" action="">
-    <input type="hidden" name="action" value="save_employee">
 
-    <div class="form-section">
-      <div class="form-sec-hdr"><div class="form-sec-title">Dados pessoais</div></div>
-      <div class="form-body">
-        <div class="form-grid form-grid-2">
-          <div class="form-group form-full">
-            <label class="form-label">Nome completo <span class="req">*</span></label>
-            <input type="text" class="form-ctrl" placeholder="Ex.: Carlos Eduardo Silva">
-          </div>
-          <div class="form-group">
-            <label class="form-label">CPF <span class="req">*</span></label>
-            <input type="text" class="form-ctrl" placeholder="000.000.000-00">
-          </div>
-          <div class="form-group">
-            <label class="form-label">Data de nascimento</label>
-            <input type="date" class="form-ctrl">
-          </div>
-          <div class="form-group">
-            <label class="form-label">E-mail</label>
-            <input type="email" class="form-ctrl" placeholder="colaborador@empresa.com">
-          </div>
-          <div class="form-group">
-            <label class="form-label">Telefone</label>
-            <input type="tel" class="form-ctrl" placeholder="(11) 99999-9999">
-          </div>
-        </div>
-      </div>
-    </div>
+    require_once __DIR__ . '/pages/funcionarios/create.php';
 
-    <div class="form-section">
-      <div class="form-sec-hdr"><div class="form-sec-title">Dados profissionais</div></div>
-      <div class="form-body">
-        <div class="form-grid form-grid-2">
-          <div class="form-group">
-            <label class="form-label">Cargo <span class="req">*</span></label>
-            <input type="text" class="form-ctrl" placeholder="Ex.: Técnico de Manutenção">
-          </div>
-          <div class="form-group">
-            <label class="form-label">Setor <span class="req">*</span></label>
-            <input type="text" class="form-ctrl" placeholder="Ex.: Manutenção Elétrica">
-          </div>
-          <div class="form-group">
-            <label class="form-label">Data de admissão <span class="req">*</span></label>
-            <input type="date" class="form-ctrl">
-          </div>
-          <div class="form-group">
-            <label class="form-label">Matrícula</label>
-            <input type="text" class="form-ctrl" placeholder="Ex.: MAT-009">
-          </div>
-          <div class="form-group form-full">
-            <label class="form-label">Status do funcionário</label>
-            <select class="form-ctrl">
-              <option value="active">Ativo</option>
-              <option value="inactive">Inativo</option>
-            </select>
-          </div>
-        </div>
-      </div>
-    </div>
 
-    <div class="form-actions">
-      <span class="form-req-note"><span style="color:#ef4444">*</span> Campos obrigatórios</span>
-      <a href="<?= url(['page'=>'employees']) ?>" class="btn btn-secondary">Cancelar</a>
-      <a href="<?= url(['page'=>'employee-form','saved'=>'1']) ?>" class="btn btn-primary">Salvar funcionário</a>
-    </div>
-  </form>
-</div>
-
-<?php
-// ====================================================================
 // EMPLOYEE PROFILE
-// ====================================================================
 elseif ($page === 'employee-profile'):
-  $emp = find_emp($employees, $emp_id);
-  $emp_records = array_values(array_filter($records, fn($r) => $r['emp_id'] === $emp['id']));
-?>
-<div class="pg">
-  <!-- Profile header -->
-  <div class="profile-hdr">
-    <div class="profile-inner">
-      <span class="avatar av-lg"><?= initials($emp['name']) ?></span>
-      <div class="profile-info">
-        <div style="display:flex;align-items:flex-start;justify-content:space-between;gap:16px">
-          <div>
-            <div class="profile-name"><?= h($emp['name']) ?></div>
-            <div class="profile-meta">
-              <span class="profile-meta-txt"><?= h($emp['role']) ?></span>
-              <span class="profile-meta-sep">·</span>
-              <span class="profile-meta-txt"><?= h($emp['sector']) ?></span>
-              <span class="profile-meta-sep">·</span>
-              <span class="profile-meta-tag"><?= h($emp['registration']) ?></span>
-            </div>
-          </div>
-          <div class="profile-actions">
-            <?= emp_badge($emp['status']) ?>
-            <a href="<?= url(['page'=>'register-training','id'=>$emp['id']]) ?>" class="btn btn-primary btn-sm">
-              <?= ico('plus', 12) ?> Registrar treinamento
-            </a>
-          </div>
-        </div>
-        <div class="profile-stats">
-          <div class="profile-stat ps-all">
-            <div class="ps-val"><?= $emp['t_total'] ?></div>
-            <div class="ps-lbl">Total</div>
-          </div>
-          <div class="profile-stat ps-green">
-            <div class="ps-val"><?= $emp['t_valid'] ?></div>
-            <div class="ps-lbl">Válidos</div>
-          </div>
-          <div class="profile-stat ps-amber">
-            <div class="ps-val"><?= $emp['t_expiring'] ?></div>
-            <div class="ps-lbl">Próximos do vencimento</div>
-          </div>
-          <div class="profile-stat ps-red">
-            <div class="ps-val"><?= $emp['t_expired'] ?></div>
-            <div class="ps-lbl">Vencidos</div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
 
-  <!-- Info cards -->
-  <div class="info-grid">
-    <div class="info-card">
-      <div class="info-card-title">Dados pessoais</div>
-      <?php foreach ([['CPF',$emp['cpf']],['E-mail',$emp['email']],['Telefone',$emp['phone']],['Nascimento',$emp['dob']]] as [$l,$v]): ?>
-      <div class="info-row"><span class="info-lbl"><?= h($l) ?></span><span class="info-val"><?= h($v) ?></span></div>
-      <?php endforeach; ?>
-    </div>
-    <div class="info-card">
-      <div class="info-card-title">Dados profissionais</div>
-      <?php foreach ([['Cargo',$emp['role']],['Setor',$emp['sector']],['Admissão',$emp['admission']],['Matrícula',$emp['registration']]] as [$l,$v]): ?>
-      <div class="info-row"><span class="info-lbl"><?= h($l) ?></span><span class="info-val"><?= h($v) ?></span></div>
-      <?php endforeach; ?>
-    </div>
-  </div>
+    require_once __DIR__ . '/pages/funcionarios/show.php';
 
-  <!-- Training history -->
-  <div class="tbl-wrap">
-    <div class="card-hdr">
-      <div>
-        <div class="card-title">Histórico de treinamentos</div>
-      </div>
-      <a href="<?= url(['page'=>'register-training','id'=>$emp['id']]) ?>" class="card-link" style="display:flex;align-items:center;gap:4px">
-        <?= ico('plus', 12) ?> Registrar treinamento
-      </a>
-    </div>
-    <?php if (empty($emp_records)): ?>
-    <div class="tbl-empty">Nenhum treinamento registrado para este funcionário.</div>
-    <?php else: ?>
-    <table class="data-tbl">
-      <thead>
-        <tr>
-          <th>Treinamento</th>
-          <th>Data de realização</th>
-          <th>Data de validade</th>
-          <th>Situação</th>
-          <th>Ações</th>
-        </tr>
-      </thead>
-      <tbody>
-        <?php foreach ($emp_records as $r): ?>
-        <tr class="<?= $r['status']==='expired' ? 'row-exp' : '' ?>">
-          <td style="font-weight:600;font-size:12px;color:#1e293b"><?= h($r['training']) ?></td>
-          <td class="cell-mono"><?= h($r['done']) ?></td>
-          <td class="cell-mono"><?= h($r['expiry']) ?></td>
-          <td><?= status_badge($r['status']) ?></td>
-          <td><button class="btn-icon" title="Editar"><?= ico('edit', 13) ?></button></td>
-        </tr>
-        <?php endforeach; ?>
-      </tbody>
-    </table>
-    <?php endif; ?>
-  </div>
-</div>
 
-<?php
-// ====================================================================
 // TRAININGS LIST
-// ====================================================================
 elseif ($page === 'trainings'):
-?>
-<div class="pg">
-  <div class="pg-hdr">
-    <div>
-      <div class="pg-title">Treinamentos</div>
-      <div class="pg-sub"><?= count($trainings) ?> tipos de treinamento cadastrados</div>
-    </div>
-    <a href="<?= url(['page'=>'training-form']) ?>" class="btn btn-primary">
-      <?= ico('plus', 13) ?> Novo treinamento
-    </a>
-  </div>
-  <div class="tbl-wrap">
-    <table class="data-tbl">
-      <thead>
-        <tr>
-          <th>Nome do treinamento</th>
-          <th>Descrição</th>
-          <th>C.H.</th>
-          <th>Validade</th>
-          <th>Funcionários</th>
-          <th>Status</th>
-          <th>Ações</th>
-        </tr>
-      </thead>
-      <tbody>
-        <?php foreach ($trainings as $t): ?>
-        <tr>
-          <td style="font-weight:600;font-size:12px;color:#1e293b"><?= h($t['name']) ?></td>
-          <td style="font-size:12px;color:#94a3b8;max-width:220px;white-space:normal"><?= h($t['desc']) ?></td>
-          <td style="font-size:12px;font-weight:500"><?= $t['hours'] ?>h</td>
-          <td style="font-size:12px"><?= $t['validity'] ?> meses</td>
-          <td>
-            <span style="display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:50%;background:#f1f5f9;font-size:12px;font-weight:700;color:#334155">
-              <?= $t['employees'] ?>
-            </span>
-          </td>
-          <td>
-            <?php if ($t['status']==='active'): ?>
-            <span class="bdg bdg-valid">Ativo</span>
-            <?php else: ?>
-            <span class="bdg bdg-inactive">Inativo</span>
-            <?php endif; ?>
-          </td>
-          <td>
-            <div style="display:flex;gap:4px">
-              <button class="btn-icon blue"><?= ico('edit', 13) ?></button>
-              <button class="btn-icon red"><?= ico('trash', 13) ?></button>
-            </div>
-          </td>
-        </tr>
-        <?php endforeach; ?>
-      </tbody>
-    </table>
-  </div>
-</div>
 
-<?php
-// ====================================================================
+    require_once __DIR__ . '/pages/treinamentos/index.php';
+
+
 // TRAINING FORM
-// ====================================================================
 elseif ($page === 'training-form'):
-?>
-<div class="pg max-w-2xl">
-  <div class="pg-hdr">
-    <div>
-      <div class="pg-title">Novo treinamento</div>
-      <div class="pg-sub">Cadastre um novo tipo de treinamento no sistema</div>
-    </div>
-  </div>
-  <div class="form-section">
-    <div class="form-sec-hdr"><div class="form-sec-title">Informações do treinamento</div></div>
-    <div class="form-body">
-      <div class="form-grid" style="gap:20px">
-        <div class="form-group">
-          <label class="form-label">Nome do treinamento <span class="req">*</span></label>
-          <input type="text" class="form-ctrl" placeholder="Ex.: Trabalho em Altura">
-        </div>
-        <div class="form-group">
-          <label class="form-label">Descrição</label>
-          <textarea rows="3" class="form-ctrl" placeholder="Descreva o objetivo e o conteúdo do treinamento..."></textarea>
-        </div>
-        <div class="form-grid form-grid-2" style="gap:20px">
-          <div class="form-group">
-            <label class="form-label">Carga horária (horas) <span class="req">*</span></label>
-            <input type="number" class="form-ctrl" placeholder="8" min="1">
-          </div>
-          <div class="form-group">
-            <label class="form-label">Validade (meses) <span class="req">*</span></label>
-            <input type="number" class="form-ctrl" placeholder="12" min="1">
-          </div>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Status</label>
-          <select class="form-ctrl">
-            <option value="active">Ativo</option>
-            <option value="inactive">Inativo</option>
-          </select>
-        </div>
-      </div>
-    </div>
-  </div>
-  <div class="form-actions">
-    <a href="<?= url(['page'=>'trainings']) ?>" class="btn btn-secondary">Cancelar</a>
-    <a href="<?= url(['page'=>'trainings']) ?>" class="btn btn-primary">Salvar treinamento</a>
-  </div>
-</div>
 
-<?php
-// ====================================================================
+    require_once __DIR__ . '/pages/treinamentos/create.php';
+
+
 // REGISTER TRAINING
-// ====================================================================
 elseif ($page === 'register-training'):
-  $emp = find_emp($employees, $emp_id);
-?>
-<div class="pg max-w-2xl">
-  <div class="pg-hdr">
-    <div>
-      <div class="pg-title">Registrar treinamento</div>
-      <div class="pg-sub">Registre a realização de um treinamento para o colaborador</div>
-    </div>
-  </div>
 
-  <div class="emp-ref">
-    <span class="avatar av-md"><?= initials($emp['name']) ?></span>
-    <div style="flex:1;min-width:0">
-      <div class="emp-ref-name"><?= h($emp['name']) ?></div>
-      <div class="emp-ref-sub"><?= h($emp['role']) ?> — <?= h($emp['sector']) ?></div>
-    </div>
-    <span class="emp-ref-id"><?= h($emp['registration']) ?></span>
-  </div>
+    require_once __DIR__ . '/pages/treinamentos/registrar.php';
 
-  <div class="form-section">
-    <div class="form-sec-hdr"><div class="form-sec-title">Dados do treinamento realizado</div></div>
-    <div class="form-body">
-      <div class="form-grid" style="gap:20px">
-        <div class="form-group">
-          <label class="form-label">Treinamento <span class="req">*</span></label>
-          <select class="form-ctrl">
-            <option value="">Selecione o treinamento...</option>
-            <?php foreach ($trainings as $t): ?>
-            <option value="<?= $t['id'] ?>"><?= h($t['name']) ?> (<?= $t['validity'] ?> meses)</option>
-            <?php endforeach; ?>
-          </select>
-        </div>
-        <div class="form-grid form-grid-2" style="gap:20px">
-          <div class="form-group">
-            <label class="form-label">Data de realização <span class="req">*</span></label>
-            <input type="date" class="form-ctrl">
-          </div>
-          <div class="form-group">
-            <label class="form-label">Data de validade <span class="req">*</span></label>
-            <input type="date" class="form-ctrl">
-          </div>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Observações</label>
-          <textarea rows="3" class="form-ctrl" placeholder="Informações adicionais sobre o treinamento realizado..."></textarea>
-        </div>
-        <div class="form-group">
-          <label class="form-label">Certificado</label>
-          <div class="upload-area" onclick="document.getElementById('cert-file').click()">
-            <div class="upload-icon-wrap"><?= ico('upload', 18) ?></div>
-            <div class="upload-title">Arraste o certificado aqui</div>
-            <div class="upload-sub">ou <span class="upload-btn-txt">clique para selecionar</span></div>
-            <div class="upload-hint">PDF, JPG ou PNG — máximo 10 MB</div>
-            <input type="file" id="cert-file" accept=".pdf,.jpg,.jpeg,.png" style="display:none">
-          </div>
-        </div>
-      </div>
-    </div>
-  </div>
 
-  <div class="form-actions">
-    <a href="<?= url(['page'=>'employee-profile','id'=>$emp['id']]) ?>" class="btn btn-secondary">Cancelar</a>
-    <a href="<?= url(['page'=>'employee-profile','id'=>$emp['id']]) ?>" class="btn btn-primary">Registrar treinamento</a>
-  </div>
-</div>
-
-<?php
-// ====================================================================
 // PENDING
-// ====================================================================
 elseif ($page === 'pending'):
-  $all_expired  = array_values(array_filter($records, fn($r) => $r['status']==='expired'));
-  $all_expiring = array_values(array_filter($records, fn($r) => $r['status']==='expiring'));
-  $in7  = array_filter($all_expiring, fn($r) => $r['days'] <= 7);
-  $in30 = $all_expiring;
 
-  $all_pending = array_merge($all_expired, $all_expiring);
+    require_once __DIR__ . '/pages/pendencias/index.php';
 
-  $sectors   = array_unique(array_column($records, 'emp_sector')); sort($sectors);
-  $trainings_list = array_unique(array_column($records, 'training')); sort($trainings_list);
+endif;
 
-  $displayed = match($tab) {
-    'expired'  => $all_expired,
-    'expiring' => $all_expiring,
-    default    => $all_pending,
-  };
-  if ($s_sect)  $displayed = array_values(array_filter($displayed, fn($r) => $r['emp_sector']===$s_sect));
-  if ($s_train) $displayed = array_values(array_filter($displayed, fn($r) => $r['training']===$s_train));
 ?>
-<div class="pg">
-  <div class="pg-hdr">
-    <div>
-      <div class="pg-title">Pendências</div>
-      <div class="pg-sub">Treinamentos vencidos ou com renovação próxima</div>
-    </div>
-  </div>
-
-  <!-- Summary cards -->
-  <div class="summary-grid">
-    <div class="sc sc-red">
-      <div class="sc-icon-row">
-        <div class="sc-icon red"><?= ico('x', 13) ?></div>
-        <span class="sc-lbl">Vencidos</span>
-      </div>
-      <div class="sc-val"><?= count($all_expired) ?></div>
-      <div class="sc-meta">renovação imediata necessária</div>
-    </div>
-    <div class="sc sc-amber">
-      <div class="sc-icon-row">
-        <div class="sc-icon amber"><?= ico('alert', 13) ?></div>
-        <span class="sc-lbl">Vencem em 7 dias</span>
-      </div>
-      <div class="sc-val"><?= count($in7) ?></div>
-      <div class="sc-meta">ação urgente recomendada</div>
-    </div>
-    <div class="sc sc-orange">
-      <div class="sc-icon-row">
-        <div class="sc-icon orange"><?= ico('clock', 13) ?></div>
-        <span class="sc-lbl">Vencem em 30 dias</span>
-      </div>
-      <div class="sc-val"><?= count($in30) ?></div>
-      <div class="sc-meta">agendar renovação</div>
-    </div>
-  </div>
-
-  <!-- Filters -->
-  <form method="GET" action="" class="filter-bar" style="margin-bottom:16px">
-    <input type="hidden" name="page" value="pending">
-    <div class="tab-bar">
-      <?php foreach ([['all','Todos ('.count($all_pending).')'],['expired','Vencidos ('.count($all_expired).')'],['expiring','Próximos ('.count($all_expiring).')']] as [$v,$lbl]): ?>
-      <button type="submit" name="tab" value="<?= $v ?>" class="tab-btn <?= $tab===$v ? 'active' : '' ?>"><?= h($lbl) ?></button>
-      <?php endforeach; ?>
-    </div>
-    <select name="sector" class="filter-sel" onchange="this.form.submit()">
-      <option value="">Todos os setores</option>
-      <?php foreach ($sectors as $s): ?>
-      <option value="<?= h($s) ?>" <?= $s_sect===$s ? 'selected' : '' ?>><?= h($s) ?></option>
-      <?php endforeach; ?>
-    </select>
-    <select name="training" class="filter-sel" onchange="this.form.submit()">
-      <option value="">Todos os treinamentos</option>
-      <?php foreach ($trainings_list as $t): ?>
-      <option value="<?= h($t) ?>" <?= $s_train===$t ? 'selected' : '' ?>><?= h($t) ?></option>
-      <?php endforeach; ?>
-    </select>
-    <?php if ($s_sect || $s_train): ?>
-    <a href="<?= url(['page'=>'pending','tab'=>$tab]) ?>" class="btn btn-secondary btn-sm"><?= ico('x', 12) ?> Limpar</a>
-    <?php endif; ?>
-  </form>
-
-  <!-- Table -->
-  <div class="tbl-wrap">
-    <table class="data-tbl">
-      <thead>
-        <tr>
-          <th>Funcionário</th>
-          <th>Treinamento</th>
-          <th>Setor</th>
-          <th>Realização</th>
-          <th>Validade</th>
-          <th>Dias restantes</th>
-          <th>Situação</th>
-          <th>Ação</th>
-        </tr>
-      </thead>
-      <tbody>
-        <?php if (empty($displayed)): ?>
-        <tr><td colspan="8" class="tbl-empty">Nenhuma pendência encontrada com os filtros selecionados.</td></tr>
-        <?php else: ?>
-        <?php foreach ($displayed as $r): ?>
-        <tr class="<?= $r['status']==='expired' ? 'row-exp' : '' ?>">
-          <td>
-            <div style="display:flex;align-items:center;gap:10px">
-              <span class="avatar av-sm"><?= initials($r['emp_name']) ?></span>
-              <div>
-                <div class="cell-primary"><?= h(implode(' ', array_slice(explode(' ',$r['emp_name']),0,2))) ?></div>
-                <div class="cell-secondary"><?= h($r['emp_role']) ?></div>
-              </div>
-            </div>
-          </td>
-          <td style="font-size:12px;font-weight:500;color:#1e293b"><?= h($r['training']) ?></td>
-          <td style="font-size:12px;color:#64748b"><?= h($r['emp_sector']) ?></td>
-          <td class="cell-mono"><?= h($r['done']) ?></td>
-          <td class="cell-mono"><?= h($r['expiry']) ?></td>
-          <td>
-            <?php if ($r['days'] < 0): ?>
-              <span class="days-exp"><?= abs($r['days']) ?>d atraso</span>
-            <?php elseif ($r['days'] <= 7): ?>
-              <span class="days-urg"><?= $r['days'] ?>d</span>
-            <?php else: ?>
-              <span class="days-ok"><?= $r['days'] ?>d</span>
-            <?php endif; ?>
-          </td>
-          <td><?= status_badge($r['status']) ?></td>
-          <td><a href="<?= url(['page'=>'employee-profile','id'=>$r['emp_id']]) ?>" class="btn-link">Ver perfil →</a></td>
-        </tr>
-        <?php endforeach; ?>
-        <?php endif; ?>
-      </tbody>
-    </table>
-    <?php if (!empty($displayed)): ?>
-    <div class="tbl-footer">
-      <?= count($displayed) ?> <?= count($displayed)===1 ? 'pendência encontrada' : 'pendências encontradas' ?>
-    </div>
-    <?php endif; ?>
-  </div>
-</div>
-
-<?php endif; ?>
 
     </main>
   </div>
 </div>
 
 <?php endif; ?>
+
 </body>
 </html>
